@@ -33,6 +33,8 @@ dependencies {
     include modImplementation ("com.github.Chocohead:Fabric-ASM:${project.fabric_asm_version}") {
         exclude group: "net.fabricmc.fabric-api"
     }
+
+    include modImplementation ("blue.endless:jankson:${project.jankson_version}")
 }
 
 if (Boolean.valueOf(project.use_runtime_deps)) {

@@ -84,6 +84,7 @@ public final class DamageInternals {
         return PREDICATE_EVENTS.computeIfAbsent(predicate, predicate1 -> new Events<>());
     }
 
+    @SuppressWarnings("unused")
     public static boolean invoke(@NotNull Entity entity, @NotNull DamageSource source, float amount) {
         if (!INVOKED_THIS_TICK.add(entity))
             return false;
