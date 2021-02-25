@@ -2,9 +2,7 @@ package adudecalledleo.speedbridge.entityevents.impl;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableSet;
-import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
-import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import it.unimi.dsi.fastutil.objects.*;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 import org.apache.commons.lang3.StringUtils;
@@ -12,10 +10,12 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.tree.AnnotationNode;
-import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.Opcodes;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -28,14 +28,42 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 public final class EntityClassScanner {
+    private static final class MixinChecker extends ClassVisitor {
+        public boolean isMixin;
+
+        public MixinChecker() {
+            super(Opcodes.ASM7);
+        }
+
+        @Override
+        public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+            super.visit(version, access, name, signature, superName, interfaces);
+            isMixin = false;
+        }
+
+        @Override
+        public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+            if ("Lorg/spongepowered/asm/mixin/Mixin;".equals(desc))
+                isMixin = true;
+            return super.visitAnnotation(desc, visible);
+        }
+    }
+
     private static final Logger LOGGER = LogManager.getLogger("EntityEvents|EntityClassScanner");
     public final ObjectOpenHashSet<String> entityClassNames = new ObjectOpenHashSet<>();
-    private final ObjectOpenHashSet<String> mixinClassNames = new ObjectOpenHashSet<>();
-    private boolean addedNewEntriesLastPass = false;
+    private ObjectSet<String> entityClassNamesSync = ObjectSets.synchronize(entityClassNames);
+    private final ObjectSet<String> mixinClassNames = ObjectSets.synchronize(new ObjectOpenHashSet<>());
+    private static final ThreadLocal<MixinChecker> TL_CHECKER = ThreadLocal.withInitial(MixinChecker::new);
+    private final AtomicBoolean foundNewEntityThisPass = new AtomicBoolean(false);
     private final @Nullable MessageDigest md5Disgest;
 
     public EntityClassScanner() {
@@ -65,10 +93,11 @@ public final class EntityClassScanner {
                     Path path = Paths.get(originURI);
                     if (Files.isDirectory(path))
                         return CHECKSUM_DIRECTORY;
-                    try (InputStream input = Files.newInputStream(path)) {
+                    try (InputStream input = Files.newInputStream(path);
+                         BufferedInputStream bInput = new BufferedInputStream(input)) {
                         byte[] buf = new byte[1024];
                         int count;
-                        while ((count = input.read(buf)) > 0) {
+                        while ((count = bInput.read(buf)) > 0) {
                             md5Disgest.update(buf, 0, count);
                         }
                         buf = md5Disgest.digest();
@@ -96,8 +125,8 @@ public final class EntityClassScanner {
         Object2ReferenceOpenHashMap<String, String> modChecksums = new Object2ReferenceOpenHashMap<>();
         for (ModContainer mod : FabricLoader.getInstance().getAllMods()) {
             String modId = mod.getMetadata().getId();
-            if ("java".equals(modId))
-                // hardcoded exception :P
+            // hardcoded exceptions :P
+            if ("fabricloader".equals(modId) || "java".equals(modId))
                 continue;
             String fileChecksum = getModFileChecksum(mod);
             if (CHECKSUM_DIRECTORY.equals(fileChecksum))
@@ -120,37 +149,56 @@ public final class EntityClassScanner {
 
         if (!modsToScan.isEmpty()) {
             LOGGER.info("Now scanning for Entity subclasses in {} mods...", modsToScan.size());
+            MappedNames.initialize(); // load this class before we start threadin', because apparently Knot can deadlock when loading classes
+            ExecutorService executorService = Executors.newWorkStealingPool(Runtime.getRuntime().availableProcessors());
             Object2ReferenceOpenHashMap<String, ImmutableSet.Builder<String>> setBuilders = new Object2ReferenceOpenHashMap<>();
+            Object2ReferenceMap<String, ImmutableSet.Builder<String>> setBuildersSync = Object2ReferenceMaps.synchronize(setBuilders);
             int pass = 1;
-            int count = 0;
+            AtomicInteger count = new AtomicInteger();
             Stopwatch stopwatch = Stopwatch.createStarted();
             do {
                 if (pass > 20)
                     throw new RuntimeException("Took too long to scan!");
-                addedNewEntriesLastPass = false;
+                foundNewEntityThisPass.set(false);
                 LOGGER.debug(" == SCANNING FOR ENTITY CLASSES, PASS {} == ", pass);
+                ReferenceOpenHashSet<Callable<Void>> callables = new ReferenceOpenHashSet<>();
                 for (ModContainer mod : modsToScan) {
-                    LOGGER.debug("Scanning in mod \"{}\"", mod.getMetadata().getId());
-                    ImmutableSet.Builder<String> builder = setBuilders.computeIfAbsent(mod.getMetadata().getId(), s -> ImmutableSet.builder());
-                    count += scanDirectoryOrFile(mod.getRootPath(), builder::add);
+                    callables.add(() -> {
+                        LOGGER.debug("Scanning in mod \"{}\"", mod.getMetadata().getId());
+                        ImmutableSet.Builder<String> builder = setBuildersSync.computeIfAbsent(mod.getMetadata().getId(), s -> ImmutableSet.builder());
+                        count.addAndGet(scanDirectoryOrFile(mod.getRootPath(), builder::add));
+                        return null;
+                    });
                 }
-                if (addedNewEntriesLastPass)
+                try {
+                    executorService.invokeAll(callables);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException("Pass execution was interrupted!", e);
+                }
+                if (foundNewEntityThisPass.get())
                     pass++;
                 else
                     LOGGER.debug(" == FINISHED ENTITY CLASS SCAN IN {} PASSES == ", pass);
-            } while (addedNewEntriesLastPass);
-            LOGGER.info("Found {} Entity subclasses in {}ms!", count, stopwatch.stop().elapsed(TimeUnit.MILLISECONDS));
+            } while (foundNewEntityThisPass.get());
+            LOGGER.info("Found {} Entity subclasses in {}ms!", count.get(), stopwatch.stop().elapsed(TimeUnit.MILLISECONDS));
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(3, TimeUnit.SECONDS))
+                    executorService.shutdownNow();
+            } catch (InterruptedException ignored) { }
 
             for (Object2ReferenceMap.Entry<String, ImmutableSet.Builder<String>> entry : setBuilders.object2ReferenceEntrySet())
                 cache.putEntry(new ScanResultCache.Entry(entry.getKey(), modChecksums.get(entry.getKey()), entry.getValue().build()));
         }
 
         cache.save();
+        entityClassNamesSync = null;
+        entityClassNames.trim();
     }
 
     private int scanDirectoryOrFile(@NotNull Path path, @NotNull Consumer<String> resultConsumer) {
         if (Files.isDirectory(path)) {
-            //System.out.println("Scanning children of directory \"" + path + "\"");
+            LOGGER.trace("Scanning children of directory \"{}\"", path);
             int sum = 0;
             try (DirectoryStream<Path> ds = Files.newDirectoryStream(path)) {
                 for (Path child : ds)
@@ -164,9 +212,10 @@ public final class EntityClassScanner {
             if (fileName.endsWith(".class")) {
                 String pathString = path.toString();
                 String quickClassName = pathString.substring(1, pathString.length() - ".class".length());
-                if (mixinClassNames.contains(quickClassName) || entityClassNames.contains(quickClassName))
+                LOGGER.trace("Checking if \"{}\" already got scanned", quickClassName);
+                if (mixinClassNames.contains(quickClassName) || entityClassNamesSync.contains(quickClassName))
                     return 0;
-                //System.out.println("Scanning class \"" + path + "\"");
+                LOGGER.trace("Scanning class \"{}\"", path);
                 try (InputStream is = Files.newInputStream(path)) {
                     if (scanClass(is, resultConsumer))
                         return 1;
@@ -181,21 +230,16 @@ public final class EntityClassScanner {
     private boolean scanClass(@NotNull InputStream is, @NotNull Consumer<String> resultConsumer) throws IOException {
         ClassReader reader = new ClassReader(is);
         String className = reader.getClassName();
-        if (MappedNames.CLASS_ENTITY.equals(className) || entityClassNames.contains(reader.getSuperName())) {
-            ClassNode classNode = new ClassNode();
-            reader.accept(classNode, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-            if (classNode.invisibleAnnotations != null) {
-                for (AnnotationNode annotation : classNode.invisibleAnnotations) {
-                    if ("Lorg/spongepowered/asm/mixin/Mixin;".equals(annotation.desc)) {
-                        mixinClassNames.add(className);
-                        return false;
-                    }
-                }
-            }
-            if (entityClassNames.add(className)) {
+        if (MappedNames.CLASS_ENTITY.equals(className) || entityClassNamesSync.contains(reader.getSuperName())) {
+            MixinChecker checker = TL_CHECKER.get();
+            reader.accept(checker, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            if (checker.isMixin) {
+                mixinClassNames.add(className);
+                return false;
+            } else if (entityClassNamesSync.add(className)) {
                 LOGGER.debug("Found entity subclass \"{}\"", className);
                 resultConsumer.accept(className);
-                addedNewEntriesLastPass = true;
+                foundNewEntityThisPass.set(true);
                 return true;
             }
         }

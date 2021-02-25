@@ -30,6 +30,8 @@ public final class MappedNames {
         return s.replace('.', '/');
     }
 
+    public static void initialize() { /* clinit */ }
+
     public static boolean matchesDamageMethod(@NotNull String name, @NotNull String desc) {
         return METHOD_ENTITY_DAMAGE_NAME.equals(name) && METHOD_ENTITY_DAMAGE_DESC.equals(desc);
     }
