@@ -12,10 +12,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 
 import java.io.IOException;
@@ -29,65 +27,14 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public final class EntityClassScanner {
-    private static final class MixinChecker extends ClassVisitor {
-        public boolean isMixin;
-
-        public MixinChecker() {
-            super(Opcodes.ASM7);
-        }
-
-        @Override
-        public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-            super.visit(version, access, name, signature, superName, interfaces);
-            isMixin = false;
-        }
-
-        @Override
-        public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
-            if ("Lorg/spongepowered/asm/mixin/Mixin;".equals(desc))
-                isMixin = true;
-            return super.visitAnnotation(desc, visible);
-        }
-    }
-
-    private static final class ReusableClassNode extends ClassNode {
-        public ReusableClassNode() {
-            super(Opcodes.ASM9);
-        }
-
-        @Override
-        public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-            super.visit(version, access, name, signature, superName, interfaces);
-            // reset everything!
-            clearList(visibleAnnotations);
-            clearList(invisibleAnnotations);
-            clearList(visibleTypeAnnotations);
-            clearList(invisibleTypeAnnotations);
-            clearList(attrs);
-            clearList(innerClasses);
-            clearList(nestMembers);
-            clearList(permittedSubclasses);
-            clearList(recordComponents);
-            clearList(fields);
-            clearList(methods);
-        }
-
-        private <T> void clearList(@Nullable List<T> list) {
-            if (list != null)
-                list.clear();
-        }
-    }
-
     private static final Logger LOGGER = LogManager.getLogger("EntityEvents|EntityClassScanner");
     public final ObjectOpenHashSet<String> entityClassNames = new ObjectOpenHashSet<>();
-    private final ReusableClassNode theOneClassNode = new ReusableClassNode();
-    private final MixinChecker mixinChecker = new MixinChecker();
+    private final ObjectOpenHashSet<String> mixinClassNames = new ObjectOpenHashSet<>();
     private boolean addedNewEntriesLastPass = false;
     private final @Nullable MessageDigest md5Disgest;
 
@@ -167,7 +114,7 @@ public final class EntityClassScanner {
         }
         if (cachedCount > 0) {
             LOGGER.info("Loaded {} Entity subclass names from the cache.", cachedCount);
-            // we don't care about mod IDs or file hashes, just give use the entity class names
+            // we don't care about mod IDs or file checksums, just give us the entity class names
             cache.getAllEntries().stream().flatMap(entry -> entry.entitySubclasses.stream()).forEach(entityClassNames::add);
         }
 
@@ -217,14 +164,14 @@ public final class EntityClassScanner {
             if (fileName.endsWith(".class")) {
                 String pathString = path.toString();
                 String quickClassName = pathString.substring(1, pathString.length() - ".class".length());
-                if (!entityClassNames.contains(quickClassName)) {
-                    //System.out.println("Scanning class \"" + path + "\"");
-                    try (InputStream is = Files.newInputStream(path)) {
-                        if (scanClass(is, resultConsumer))
-                            return 1;
-                    } catch (IOException e) {
-                        LOGGER.error("Failed to scan class \"" + path.toString() + "\"!", e);
-                    }
+                if (mixinClassNames.contains(quickClassName) || entityClassNames.contains(quickClassName))
+                    return 0;
+                //System.out.println("Scanning class \"" + path + "\"");
+                try (InputStream is = Files.newInputStream(path)) {
+                    if (scanClass(is, resultConsumer))
+                        return 1;
+                } catch (IOException e) {
+                    LOGGER.error("Failed to scan class \"" + path.toString() + "\"!", e);
                 }
             }
             return 0;
@@ -235,15 +182,21 @@ public final class EntityClassScanner {
         ClassReader reader = new ClassReader(is);
         String className = reader.getClassName();
         if (MappedNames.CLASS_ENTITY.equals(className) || entityClassNames.contains(reader.getSuperName())) {
-            reader.accept(theOneClassNode, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-            theOneClassNode.accept(mixinChecker);
-            if (!mixinChecker.isMixin) {
-                if (entityClassNames.add(className)) {
-                    LOGGER.debug("Adding \"" + className + "\" as entity class");
-                    resultConsumer.accept(className);
-                    addedNewEntriesLastPass = true;
-                    return true;
+            ClassNode classNode = new ClassNode();
+            reader.accept(classNode, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            if (classNode.invisibleAnnotations != null) {
+                for (AnnotationNode annotation : classNode.invisibleAnnotations) {
+                    if ("Lorg/spongepowered/asm/mixin/Mixin;".equals(annotation.desc)) {
+                        mixinClassNames.add(className);
+                        return false;
+                    }
                 }
+            }
+            if (entityClassNames.add(className)) {
+                LOGGER.debug("Found entity subclass \"{}\"", className);
+                resultConsumer.accept(className);
+                addedNewEntriesLastPass = true;
+                return true;
             }
         }
         return false;
