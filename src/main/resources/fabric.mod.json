@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "speedbridge-entity-events",
+  "version": "${version}",
+  "name": "Speedbridge Entity Events",
+  "description": "Adds various entity events that work with *all* entities. No exceptions.",
+  "authors": [
+    "ADudeCalledLeo"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/speedbridge-entity-events/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "mm:early_risers": [
+      "adudecalledleo.speedbridge.entityevents.impl.EarlyRiserInitializer"
+    ]
+  },
+  "mixins": [
+    "speedbridge-entity-events.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.11.2",
+    "fabric": "*",
+    "minecraft": "1.16.5"
+  }
+}
