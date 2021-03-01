@@ -1,5 +1,7 @@
 package adudecalledleo.speedbridge.entityevents.impl;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.Opcodes;
@@ -9,12 +11,17 @@ import org.objectweb.asm.tree.*;
 public final class EventCallbackInjector {
     private EventCallbackInjector() { }
 
+    public static final Logger LOGGER = LogManager.getLogger("EntityEvents|EventCallbackInjector");
+
     public static void transform(@NotNull ClassNode classNode) {
         for (MethodNode method : classNode.methods) {
             if ((method.access & Opcodes.ACC_PUBLIC) == 0)
                 continue; // ignore non-public methods
-            if (MappedNames.matchesDamageMethod(method.name, method.desc))
+            if (MappedNames.matchesDamageMethod(method.name, method.desc)) {
+                LOGGER.debug("Injecting damage event callback into {}.{}{}",
+                        classNode.name.replace('/', '.'), method.name, method.desc);
                 method.instructions.insert(getDamageInjectionInstructions());
+            }
         }
     }
 

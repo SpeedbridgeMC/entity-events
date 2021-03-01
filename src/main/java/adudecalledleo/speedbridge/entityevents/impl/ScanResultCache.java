@@ -111,6 +111,10 @@ public final class ScanResultCache {
         backingMap.put(entry.modId, entry);
     }
 
+    public void removeEntry(@NotNull String modId) {
+        backingMap.remove(modId);
+    }
+
     public @NotNull ReferenceCollection<Entry> getAllEntries() {
         return backingMap.values();
     }

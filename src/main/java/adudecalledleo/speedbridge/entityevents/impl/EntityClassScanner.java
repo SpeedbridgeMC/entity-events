@@ -41,12 +41,11 @@ public final class EntityClassScanner {
         public boolean isMixin;
 
         public MixinChecker() {
-            super(Opcodes.ASM7);
+            super(Opcodes.ASM8);
         }
 
         @Override
         public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-            super.visit(version, access, name, signature, superName, interfaces);
             isMixin = false;
         }
 
@@ -60,9 +59,9 @@ public final class EntityClassScanner {
 
     private static final Logger LOGGER = LogManager.getLogger("EntityEvents|EntityClassScanner");
     public final ObjectOpenHashSet<String> entityClassNames = new ObjectOpenHashSet<>();
-    private ObjectSet<String> entityClassNamesSync = ObjectSets.synchronize(entityClassNames);
+    private final ObjectSet<String> entityClassNamesSync = ObjectSets.synchronize(entityClassNames);
     private final ObjectSet<String> mixinClassNames = ObjectSets.synchronize(new ObjectOpenHashSet<>());
-    private static final ThreadLocal<MixinChecker> TL_CHECKER = ThreadLocal.withInitial(MixinChecker::new);
+    private final ThreadLocal<MixinChecker> tlChecker = ThreadLocal.withInitial(MixinChecker::new);
     private final AtomicBoolean foundNewEntityThisPass = new AtomicBoolean(false);
     private final @Nullable MessageDigest md5Disgest;
 
@@ -135,9 +134,10 @@ public final class EntityClassScanner {
             else {
                 modChecksums.put(modId, fileChecksum);
                 ScanResultCache.Entry cachedEntry = cache.getEntry(modId);
-                if (cachedEntry == null || !StringUtils.equalsIgnoreCase(fileChecksum, cachedEntry.fileChecksum))
+                if (cachedEntry == null || !StringUtils.equalsIgnoreCase(fileChecksum, cachedEntry.fileChecksum)) {
+                    cache.removeEntry(modId);
                     modsToScan.add(mod);
-                else
+                } else
                     cachedCount += cachedEntry.entitySubclasses.size();
             }
         }
@@ -153,8 +153,19 @@ public final class EntityClassScanner {
             ExecutorService executorService = Executors.newWorkStealingPool(Runtime.getRuntime().availableProcessors());
             Object2ReferenceOpenHashMap<String, ImmutableSet.Builder<String>> setBuilders = new Object2ReferenceOpenHashMap<>();
             Object2ReferenceMap<String, ImmutableSet.Builder<String>> setBuildersSync = Object2ReferenceMaps.synchronize(setBuilders);
+
+            int countSrc = 0;
+            // add root Entity class to save some time
+            if (entityClassNames.add(MappedNames.CLASS_ENTITY)) {
+                // add it to the cache manually lmao
+                ImmutableSet.Builder<String> minecraftClassesBuilder = ImmutableSet.builder();
+                minecraftClassesBuilder.add(MappedNames.CLASS_ENTITY);
+                setBuilders.put("minecraft", minecraftClassesBuilder);
+                countSrc = 1;
+            }
+
             int pass = 1;
-            AtomicInteger count = new AtomicInteger();
+            AtomicInteger count = new AtomicInteger(countSrc);
             Stopwatch stopwatch = Stopwatch.createStarted();
             do {
                 if (pass > 20)
@@ -192,7 +203,6 @@ public final class EntityClassScanner {
         }
 
         cache.save();
-        entityClassNamesSync = null;
         entityClassNames.trim();
     }
 
@@ -212,7 +222,6 @@ public final class EntityClassScanner {
             if (fileName.endsWith(".class")) {
                 String pathString = path.toString();
                 String quickClassName = pathString.substring(1, pathString.length() - ".class".length());
-                LOGGER.trace("Checking if \"{}\" already got scanned", quickClassName);
                 if (mixinClassNames.contains(quickClassName) || entityClassNamesSync.contains(quickClassName))
                     return 0;
                 LOGGER.trace("Scanning class \"{}\"", path);
@@ -230,8 +239,8 @@ public final class EntityClassScanner {
     private boolean scanClass(@NotNull InputStream is, @NotNull Consumer<String> resultConsumer) throws IOException {
         ClassReader reader = new ClassReader(is);
         String className = reader.getClassName();
-        if (MappedNames.CLASS_ENTITY.equals(className) || entityClassNamesSync.contains(reader.getSuperName())) {
-            MixinChecker checker = TL_CHECKER.get();
+        if (entityClassNamesSync.contains(reader.getSuperName())) {
+            MixinChecker checker = tlChecker.get();
             reader.accept(checker, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             if (checker.isMixin) {
                 mixinClassNames.add(className);
