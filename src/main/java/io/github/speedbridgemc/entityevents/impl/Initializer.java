@@ -1,6 +1,6 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
-import adudecalledleo.speedbridge.entityevents.impl.event.DamageInternals;
+import io.github.speedbridgemc.entityevents.impl.event.DamageInternals;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 

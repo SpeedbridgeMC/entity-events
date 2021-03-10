@@ -1,6 +1,6 @@
-package adudecalledleo.speedbridge.entityevents.api;
+package io.github.speedbridgemc.entityevents.api;
 
-import adudecalledleo.speedbridge.entityevents.impl.event.DamageInternals;
+import io.github.speedbridgemc.entityevents.impl.event.DamageInternals;
 import net.fabricmc.fabric.api.util.TriState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;

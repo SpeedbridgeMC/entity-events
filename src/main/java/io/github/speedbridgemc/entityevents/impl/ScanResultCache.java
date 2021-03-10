@@ -1,4 +1,4 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
 import blue.endless.jankson.*;
 import blue.endless.jankson.api.SyntaxError;

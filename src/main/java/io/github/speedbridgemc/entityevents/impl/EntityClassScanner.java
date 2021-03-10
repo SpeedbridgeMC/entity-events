@@ -1,4 +1,4 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableSet;
@@ -86,7 +86,7 @@ public final class EntityClassScanner {
                 try {
                     originURI = originURL.toURI();
                 } catch (URISyntaxException e) {
-                    LOGGER.error("Failed to convert URL \"" + originURL + "\" to URL!", e);
+                    LOGGER.error("Failed to convert URL \"" + originURL + "\" to URI!", e);
                 }
                 if (originURI != null) {
                     Path path = Paths.get(originURI);

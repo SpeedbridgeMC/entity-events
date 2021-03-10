@@ -1,6 +1,6 @@
-package adudecalledleo.speedbridge.entityevents.impl.event;
+package io.github.speedbridgemc.entityevents.impl.event;
 
-import adudecalledleo.speedbridge.entityevents.api.EntityDamageEvents;
+import io.github.speedbridgemc.entityevents.api.EntityDamageEvents;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashBigSet;

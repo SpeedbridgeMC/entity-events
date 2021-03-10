@@ -1,4 +1,4 @@
 @ApiStatus.Internal
-package adudecalledleo.speedbridge.entityevents.impl.event;
+package io.github.speedbridgemc.entityevents.impl;
 
 import org.jetbrains.annotations.ApiStatus;

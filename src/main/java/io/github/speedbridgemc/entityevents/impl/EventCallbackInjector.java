@@ -1,4 +1,4 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,7 +43,7 @@ public final class EventCallbackInjector {
         instructions.add(new VarInsnNode(Opcodes.FLOAD, 2)); // amount
         // invoke our damage events
         instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
-                "adudecalledleo/speedbridge/entityevents/impl/event/DamageInternals",
+                "io/github/speedbridgemc/entityevents/impl/event/DamageInternals",
                 "invoke", MappedNames.METHOD_EVENT_DAMAGE_INVOKE_DESC));
         instructions.add(new JumpInsnNode(Opcodes.IFEQ, continueLabel));
         // if we should cancel, return false

@@ -1,4 +1,4 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.MappingResolver;

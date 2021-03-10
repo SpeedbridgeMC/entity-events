@@ -1,4 +1,4 @@
-package adudecalledleo.speedbridge.entityevents.impl;
+package io.github.speedbridgemc.entityevents.impl;
 
 import com.chocohead.mm.api.ClassTinkerers;
 
