@@ -63,63 +63,100 @@ public final class EntityClassScanner {
     private final ObjectSet<String> mixinClassNames = ObjectSets.synchronize(new ObjectOpenHashSet<>());
     private final ThreadLocal<MixinChecker> tlChecker = ThreadLocal.withInitial(MixinChecker::new);
     private final AtomicBoolean foundNewEntityThisPass = new AtomicBoolean(false);
-    private final @Nullable MessageDigest md5Disgest;
+    private final @Nullable MessageDigest checksumDigest;
 
     public EntityClassScanner() {
         MessageDigest tempDigest = null;
         try {
-            tempDigest = MessageDigest.getInstance("MD5");
+            tempDigest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
-            LOGGER.error("Failed to get MD5 MessageDigest instance! File checksums will not be available", e);
+            LOGGER.error("Failed to get SHA-256 MessageDigest instance! File checksums will not be available", e);
         }
-        md5Disgest = tempDigest;
+        checksumDigest = tempDigest;
     }
 
-    private static final String CHECKSUM_DIRECTORY = "DIRECTORY";
+    private static final class ChecksumResult {
+        private final boolean directory;
+        private final @Nullable String checksum;
 
-    private @Nullable String getModFileChecksum(@NotNull ModContainer mod) {
+        private ChecksumResult(boolean directory, @Nullable String checksum) {
+            this.directory = directory;
+            this.checksum = checksum;
+        }
+
+        private static final ChecksumResult DIRECTORY = new ChecksumResult(true, null);
+        private static final ChecksumResult FAILURE = new ChecksumResult(false, null);
+
+        public static @NotNull ChecksumResult directory() {
+            return DIRECTORY;
+        }
+
+        public static @NotNull ChecksumResult failure() {
+            return FAILURE;
+        }
+
+        public static @NotNull ChecksumResult success(@NotNull String checksum) {
+            return new ChecksumResult(false, checksum);
+        }
+
+        @SuppressWarnings("UnusedReturnValue")
+        public @NotNull ChecksumResult ifDirectory(@NotNull Runnable runnable) {
+            if (directory)
+                runnable.run();
+            return this;
+        }
+
+        @SuppressWarnings("UnusedReturnValue")
+        public @NotNull ChecksumResult ifPresent(@NotNull Consumer<@NotNull String> consumer) {
+            if (checksum != null)
+                consumer.accept(checksum);
+            return this;
+        }
+    }
+
+    private @NotNull ChecksumResult calculateModChecksum(@NotNull ModContainer mod) {
+        if (checksumDigest == null)
+            return ChecksumResult.failure();
         final String modId = mod.getMetadata().getId();
-        if (md5Disgest != null) {
-            if (mod instanceof net.fabricmc.loader.ModContainer) {
-                URL originURL = ((net.fabricmc.loader.ModContainer) mod).getOriginUrl();
-                URI originURI = null;
-                try {
-                    originURI = originURL.toURI();
-                } catch (URISyntaxException e) {
-                    LOGGER.error("Failed to convert URL \"" + originURL + "\" to URI!", e);
-                }
-                if (originURI != null) {
-                    Path path = Paths.get(originURI);
-                    if (Files.isDirectory(path))
-                        return CHECKSUM_DIRECTORY;
-                    try (InputStream input = Files.newInputStream(path);
-                         BufferedInputStream bInput = new BufferedInputStream(input)) {
-                        byte[] buf = new byte[1024];
-                        int count;
-                        while ((count = bInput.read(buf)) > 0) {
-                            md5Disgest.update(buf, 0, count);
-                        }
-                        buf = md5Disgest.digest();
-                        md5Disgest.reset();
-                        StringBuilder sb = new StringBuilder();
-                        for (byte b : buf)
-                            sb.append(String.format("%02X", b));
-                        return sb.toString().toUpperCase(Locale.ROOT);
-                    } catch (IOException e) {
-                        LOGGER.error("Failed to read from mod file \"" + path + "\"!", e);
+        if (mod instanceof net.fabricmc.loader.ModContainer) {
+            URL originURL = ((net.fabricmc.loader.ModContainer) mod).getOriginUrl();
+            URI originURI = null;
+            try {
+                originURI = originURL.toURI();
+            } catch (URISyntaxException e) {
+                LOGGER.error("Failed to convert URL \"" + originURL + "\" to URI!", e);
+            }
+            if (originURI != null) {
+                Path path = Paths.get(originURI);
+                if (Files.isDirectory(path))
+                    return ChecksumResult.directory();
+                try (InputStream input = Files.newInputStream(path);
+                     BufferedInputStream bInput = new BufferedInputStream(input)) {
+                    byte[] buf = new byte[1024];
+                    int count;
+                    while ((count = bInput.read(buf)) > 0) {
+                        checksumDigest.update(buf, 0, count);
                     }
+                    buf = checksumDigest.digest();
+                    checksumDigest.reset();
+                    StringBuilder sb = new StringBuilder();
+                    for (byte b : buf)
+                        sb.append(String.format("%02X", b));
+                    return ChecksumResult.success(sb.toString().toUpperCase(Locale.ROOT));
+                } catch (IOException e) {
+                    LOGGER.error("Failed to read from mod file \"" + path + "\"!", e);
                 }
             }
-            LOGGER.error("Failed to determine the file checksum of mod \"{}\" - please delete its entry in the cache if you update it!", modId);
         }
-        return null;
+        LOGGER.error("Failed to determine the file checksum of mod \"{}\" - please delete its entry in the cache if you update it!", modId);
+        return ChecksumResult.failure();
     }
 
     public void scan() {
         ScanResultCache cache = new ScanResultCache();
         cache.load();
 
-        int cachedCount = 0;
+        final int[] cachedCount = { 0 };
         ObjectOpenHashSet<ModContainer> modsToScan = new ObjectOpenHashSet<>();
         Object2ReferenceOpenHashMap<String, String> modChecksums = new Object2ReferenceOpenHashMap<>();
         for (ModContainer mod : FabricLoader.getInstance().getAllMods()) {
@@ -127,22 +164,18 @@ public final class EntityClassScanner {
             // hardcoded exceptions :P
             if ("fabricloader".equals(modId) || "java".equals(modId))
                 continue;
-            String fileChecksum = getModFileChecksum(mod);
-            if (CHECKSUM_DIRECTORY.equals(fileChecksum))
-                // always rescan directories (dev folders)
-                modsToScan.add(mod);
-            else {
-                modChecksums.put(modId, fileChecksum);
+            calculateModChecksum(mod).ifPresent(checksum -> {
+                modChecksums.put(modId, checksum);
                 ScanResultCache.Entry cachedEntry = cache.getEntry(modId);
-                if (cachedEntry == null || !StringUtils.equalsIgnoreCase(fileChecksum, cachedEntry.fileChecksum)) {
+                if (cachedEntry == null || !StringUtils.equalsIgnoreCase(checksum, cachedEntry.fileChecksum)) {
                     cache.removeEntry(modId);
                     modsToScan.add(mod);
                 } else
-                    cachedCount += cachedEntry.entitySubclasses.size();
-            }
+                    cachedCount[0] += cachedEntry.entitySubclasses.size();
+            }).ifDirectory(() -> modsToScan.add(mod)); // always rescan folder mods (dev environment)
         }
-        if (cachedCount > 0) {
-            LOGGER.info("Loaded {} Entity subclass names from the cache.", cachedCount);
+        if (cachedCount[0] > 0) {
+            LOGGER.info("Loaded {} Entity subclass names from the cache.", cachedCount[0]);
             // we don't care about mod IDs or file checksums, just give us the entity class names
             cache.getAllEntries().stream().flatMap(entry -> entry.entitySubclasses.stream()).forEach(entityClassNames::add);
         }
