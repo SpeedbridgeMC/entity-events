@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "entity-events-testmod",
+  "version": "${version}",
+  "name": "Entity Events Test Mod",
+  "description": "Test mod for Entity Events API.",
+  "authors": [
+    "ADudeCalledLeo"
+  ],
+  "contact": {
+    "homepage": "https://github.com/SpeedbridgeMC/entity-events",
+    "sources": "https://github.com/Leo40Git/entity-events",
+    "issues": "https://github.com/Leo40Git/entity-events/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/entity-events-testmod/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "io.github.speedbridgemc.entityevents.testmod.Initializer"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.10.8",
+    "fabric": "*"
+  }
+}
