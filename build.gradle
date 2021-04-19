@@ -1,6 +1,7 @@
 plugins {
-    id 'fabric-loom' version '0.5-SNAPSHOT'
+    id 'fabric-loom' version '0.6-SNAPSHOT'
     id 'maven-publish'
+    id 'signing'
 }
 
 sourceCompatibility = JavaVersion.VERSION_1_8
@@ -9,6 +10,7 @@ targetCompatibility = JavaVersion.VERSION_1_8
 archivesBaseName = project.archives_base_name
 version = project.mod_version
 group = project.maven_group
+description = 'An entity events API. Not much more to it than that.'
 
 repositories {
     maven {
@@ -81,8 +83,24 @@ jar {
     from "LICENSE"
 }
 
+ext {
+    isReleaseVersion = !version.endsWith("SNAPSHOT")
+}
+
 // configure the maven publication
 publishing {
+    repositories {
+        maven {
+            def releaseRepo = 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/'
+            def snapshotRepo = 'https://s01.oss.sonatype.org/content/repositories/snapshots/'
+            url = project.ext.isReleaseVersion ? releaseRepo : snapshotRepo
+            credentials {
+                username = rootProject.hasProperty('ossrhUsername') ? ossrhUsername : "Unknown user"
+                password = rootProject.hasProperty('ossrhPassword') ? ossrhPassword : "Unknown password"
+            }
+        }
+    }
+
     publications {
         mavenJava(MavenPublication) {
             // add all the jars that should be included when publishing to maven
@@ -92,6 +110,34 @@ publishing {
             artifact(sourcesJar) {
                 builtBy remapSourcesJar
             }
+
+            pom {
+                groupId = rootProject.group
+                artifactId = project.name
+                version = project.version
+
+                name = project.name
+                description = project.description
+                url = 'https://speedbridgemc.github.io'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'http://www.opensource.org/licenses/mit-license.php'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'ADudeCalledLeo'
+                        name = 'Kfir Awad'
+                        email = 'kfirawad@gmail.com'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/SpeedbridgeMC/entity-events.git'
+                    developerConnection = 'scm:git:ssh://github.com:SpeedbridgeMC/entity-events.git'
+                    url = 'https://github.com/SpeedbridgeMC/entity-events/tree/1.16'
+                }
+            }
         }
     }
 
@@ -100,4 +146,11 @@ publishing {
         // uncomment to publish to the local maven
         // mavenLocal()
     }
+}
+
+signing {
+    sign publishing.publications
+}
+tasks.withType(Sign) {
+    onlyIf { project.ext.isReleaseVersion }
 }
