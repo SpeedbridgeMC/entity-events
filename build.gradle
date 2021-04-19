@@ -76,8 +76,8 @@ tasks.withType(JavaCompile) {
 
 sourceSets {
     testmod {
-        compileClasspath += main.compileClasspath
-        runtimeClasspath += main.runtimeClasspath
+        compileClasspath += main.compileClasspath + main.output
+        runtimeClasspath += main.runtimeClasspath + main.output
     }
 }
 
