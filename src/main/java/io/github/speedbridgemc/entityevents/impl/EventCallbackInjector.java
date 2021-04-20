@@ -16,7 +16,7 @@ public final class EventCallbackInjector {
     public static void transform(@NotNull ClassNode classNode) {
         for (MethodNode method : classNode.methods) {
             if ((method.access & Opcodes.ACC_PUBLIC) == 0)
-                continue; // ignore non-public methods
+                continue; // ignore non-public methods, since they can't be overriding Entity.damage
             if (MappedNames.matchesDamageMethod(method.name, method.desc)) {
                 LOGGER.debug("Injecting damage event callback into {}.{}{}",
                         classNode.name.replace('/', '.'), method.name, method.desc);
@@ -45,8 +45,8 @@ public final class EventCallbackInjector {
         instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
                 "io/github/speedbridgemc/entityevents/impl/event/DamageInternals",
                 "invoke", MappedNames.METHOD_EVENT_DAMAGE_INVOKE_DESC));
+        // check if we should cancel - if yes, return true
         instructions.add(new JumpInsnNode(Opcodes.IFEQ, continueLabel));
-        // if we should cancel, return false
         instructions.add(new InsnNode(Opcodes.ICONST_0));
         instructions.add(new InsnNode(Opcodes.IRETURN));
         // otherwise, continue with the rest of the method

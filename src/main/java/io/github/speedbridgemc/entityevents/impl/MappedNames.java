@@ -26,6 +26,7 @@ public final class MappedNames {
         METHOD_EVENT_DAMAGE_INVOKE_DESC = String.format("(L%s;L%s;F)Z", CLASS_ENTITY, CLASS_DAMAGE_SOURCE);
     }
 
+    // converts class name from canonical to binary
     private static @NotNull String b(@NotNull String s) {
         return s.replace('.', '/');
     }
