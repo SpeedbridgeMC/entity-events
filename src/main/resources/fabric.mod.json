@@ -19,6 +19,9 @@
       "io.github.speedbridgemc.entityevents.impl.Initializer"
     ]
   },
+  "mixins": [
+    "entityevents.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.11.2",
     "fabric": "*",

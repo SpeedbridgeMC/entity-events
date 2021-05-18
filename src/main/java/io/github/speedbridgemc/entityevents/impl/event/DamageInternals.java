@@ -1,21 +1,26 @@
 package io.github.speedbridgemc.entityevents.impl.event;
 
 import io.github.speedbridgemc.entityevents.api.EntityDamageEvents;
+import io.github.speedbridgemc.entityevents.impl.WorldStorage;
+import it.unimi.dsi.fastutil.objects.Reference2BooleanOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import it.unimi.dsi.fastutil.objects.ReferenceOpenHashBigSet;
 import net.fabricmc.fabric.api.event.Event;
 import net.fabricmc.fabric.api.event.EventFactory;
 import net.fabricmc.fabric.api.util.TriState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.server.world.ServerWorld;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.Predicate;
 
+import static io.github.speedbridgemc.entityevents.impl.ServerWorldHooks.getOrCreateWorldStorage;
+import static io.github.speedbridgemc.entityevents.impl.ServerWorldHooks.getWorldStorage;
+
 public final class DamageInternals {
-    private DamageInternals() { }
+    public DamageInternals() { }
 
     private static final class Events<E extends Entity> implements EntityDamageEvents<E> {
         public final Event<Before<E>> beforeEvent;
@@ -61,8 +66,6 @@ public final class DamageInternals {
         }
     }
 
-    private static final ReferenceOpenHashBigSet<Entity> INVOKED_THIS_TICK
-            = new ReferenceOpenHashBigSet<>();
     private static final Reference2ReferenceOpenHashMap<Class<?>, Events<Entity>> CLASS_EVENTS
             = new Reference2ReferenceOpenHashMap<>();
     private static final Reference2ReferenceOpenHashMap<EntityType<?>, Events<Entity>> TYPE_EVENTS
@@ -84,10 +87,19 @@ public final class DamageInternals {
         return PREDICATE_EVENTS.computeIfAbsent(predicate, predicate1 -> new Events<>());
     }
 
+    private final Reference2BooleanOpenHashMap<Entity> invokedThisTick
+            = new Reference2BooleanOpenHashMap<>();
+
     @SuppressWarnings("unused")
     public static boolean invoke(@NotNull Entity entity, @NotNull DamageSource source, float amount) {
-        if (!INVOKED_THIS_TICK.add(entity))
+        if (entity.getEntityWorld().isClient())
             return false;
+        return getOrCreateWorldStorage((ServerWorld) entity.getEntityWorld()).getOrCreateDamageInternals().invoke0(entity, source, amount);
+    }
+
+    private boolean invoke0(@NotNull Entity entity, @NotNull DamageSource source, float amount) {
+        if (invokedThisTick.containsKey(entity))
+            return invokedThisTick.getBoolean(entity);
         boolean cancelled = invokeBeforeClass(entity, source, amount, entity.getClass());
         if (!cancelled) {
             Events<Entity> typeEvents = TYPE_EVENTS.get(entity.getType());
@@ -104,14 +116,15 @@ public final class DamageInternals {
             }
         }
         invokeAfter(entity, source, amount, cancelled);
+        invokedThisTick.put(entity, cancelled);
         return cancelled;
     }
 
-    private static boolean invokeBefore(@NotNull Events<Entity> events, @NotNull Entity entity, @NotNull DamageSource source, float amount) {
+    private boolean invokeBefore(@NotNull Events<Entity> events, @NotNull Entity entity, @NotNull DamageSource source, float amount) {
         return events.beforeEvent.invoker().beforeDamaged(entity, source, amount).orElse(false);
     }
 
-    private static boolean invokeBeforeClass(@NotNull Entity entity, @NotNull DamageSource source, float amount, @NotNull Class<?> clazz) {
+    private boolean invokeBeforeClass(@NotNull Entity entity, @NotNull DamageSource source, float amount, @NotNull Class<?> clazz) {
         if (clazz.getSuperclass() != null) {
             if (!invokeBeforeClass(entity, source, amount, clazz.getSuperclass()))
                 return false;
@@ -122,24 +135,23 @@ public final class DamageInternals {
         return invokeBefore(classEvents, entity, source, amount);
     }
 
-    private static void invokeAfter(@NotNull Events<Entity> events, @NotNull Entity entity, @NotNull DamageSource source, float amount, boolean cancelled) {
+    private void invokeAfter(@NotNull Events<Entity> events, @NotNull Entity entity, @NotNull DamageSource source, float amount, boolean cancelled) {
         if (cancelled)
             events.cancelledEvent.invoker().damageCancelled(entity, source, amount);
         else
             events.afterEvent.invoker().afterDamaged(entity, source, amount);
     }
 
-    private static void invokeAfterClass(@NotNull Entity entity, @NotNull DamageSource source, float amount, @NotNull Class<?> clazz, boolean cancelled) {
-        if (clazz.getSuperclass() != null) {
+    private void invokeAfterClass(@NotNull Entity entity, @NotNull DamageSource source, float amount, @NotNull Class<?> clazz, boolean cancelled) {
+        if (clazz.getSuperclass() != null)
             invokeAfterClass(entity, source, amount, clazz.getSuperclass(), cancelled);
-        }
         Events<Entity> classEvents = CLASS_EVENTS.get(clazz);
         if (classEvents == null)
             return;
         invokeAfter(classEvents, entity, source, amount, cancelled);
     }
 
-    private static void invokeAfter(@NotNull Entity entity, @NotNull DamageSource source, float amount, boolean cancelled) {
+    private void invokeAfter(@NotNull Entity entity, @NotNull DamageSource source, float amount, boolean cancelled) {
         invokeAfterClass(entity, source, amount, entity.getClass(), cancelled);
         Events<Entity> typeEvents = TYPE_EVENTS.get(entity.getType());
         if (typeEvents != null)
@@ -150,7 +162,11 @@ public final class DamageInternals {
         }
     }
 
-    public static void endTick() {
-        INVOKED_THIS_TICK.clear();
+    public static void endTick(@NotNull ServerWorld world) {
+        getWorldStorage(world).flatMap(WorldStorage::getDamageInternals).ifPresent(DamageInternals::endTick0);
+    }
+
+    private void endTick0() {
+        invokedThisTick.clear();
     }
 }
