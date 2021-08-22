@@ -7,17 +7,17 @@ import java.util.Optional;
 
 public interface ServerWorldHooks {
     static @NotNull Optional<WorldStorage> getWorldStorage(@NotNull ServerWorld world) {
-        return Optional.ofNullable(((ServerWorldHooks) world).entityevents_getWorldStorage());
+        return Optional.ofNullable(((ServerWorldHooks) world).entityevents$getWorldStorage());
     }
 
     static @NotNull WorldStorage getOrCreateWorldStorage(@NotNull ServerWorld world) {
         ServerWorldHooks hooks = (ServerWorldHooks) world;
-        WorldStorage storage = hooks.entityevents_getWorldStorage();
+        WorldStorage storage = hooks.entityevents$getWorldStorage();
         if (storage == null)
-            hooks.entityevents_setWorldStorage(storage = new WorldStorage());
+            hooks.entityevents$setWorldStorage(storage = new WorldStorage());
         return storage;
     }
 
-    WorldStorage entityevents_getWorldStorage();
-    void entityevents_setWorldStorage(@NotNull WorldStorage storage);
+    WorldStorage entityevents$getWorldStorage();
+    void entityevents$setWorldStorage(@NotNull WorldStorage storage);
 }
